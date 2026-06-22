@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>原物料物價記錄系統 — 銅價追蹤模組</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --accent: #8b4513;
+            --accent2: #b87333;
+            --bg: #f4f2ee;
+            --card: #ffffff;
+            --border: #d8d4cc;
+            --text: #1c1c1a;
+            --muted: #6a6a60;
+            --green: #2a6e3f;
+            --red: #b03020;
+            --mono: 'Courier New', monospace;
+        }
+        body {
+            font-family: 'Noto Serif TC', Georgia, serif;
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--bg);
+            color: var(--text);
+            font-size: 14px;
+        }
+        h1 { text-align: center; font-size: 20px; margin-bottom: 4px; }
+        .subtitle { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+
+        .source-bar {
+            background: #fdf6ee; border: 1px solid #e8d8c0; border-radius: 6px;
+            padding: 8px 14px; font-size: 12px; color: var(--muted); margin-bottom: 20px; line-height: 1.8;
+        }
+        .source-bar a { color: var(--accent); }
+
+        .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+        .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
+        .kpi .k-label { font-size: 11px; font-family: var(--mono); color: var(--muted); margin-bottom: 4px; }
+        .kpi .k-val   { font-size: 20px; font-weight: 700; font-family: var(--mono); }
+        .kpi .k-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+        .up   { color: var(--red); }
+        .down { color: var(--green); }
+
+        .card {
+            background-color: var(--card); padding: 20px; border-radius: 8px;
+            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); border: 1px solid var(--border);
+        }
+        .card h2 {
+            color: var(--accent); border-bottom: 2px solid var(--accent2);
+            padding-bottom: 10px; margin-bottom: 14px; font-size: 15px;
+        }
+
+        /* 歷史批次初始化卡片（橘棕色邊框） */
+        .card-history {
+            background: #fffaf0; border: 2px solid #8b4513;
+        }
+        .card-history h2 { color: #5c3010; border-bottom-color: #8b4513; }
+
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: bold; color: var(--muted); font-size: 12px; font-family: var(--mono); }
+        .form-group input {
+            width: 100%; padding: 9px 10px; border: 1px solid var(--border);
+            border-radius: 4px; font-size: 13px; font-family: var(--mono); background: #fafaf8;
+        }
+        .form-group input:focus { outline: none; border-color: var(--accent2); }
+
+        button {
+            padding: 10px 20px; background-color: var(--accent); color: white;
+            border: none; border-radius: 4px; font-size: 14px; cursor: pointer;
+            transition: background-color 0.2s; width: 100%; margin-top: 4px; font-family: var(--mono);
+        }
+        button:hover { background-color: var(--accent2); }
+        button:disabled { opacity: .5; cursor: default; }
+
+        .btn-history { background: #5c3010; }
+        .btn-history:hover { background: #7a4015; }
+
+        /* ── 區間抓取區塊 ── */
+        .range-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+        .range-row .form-group { flex: 1; min-width: 120px; margin-bottom: 0; }
+        .range-row button { width: auto; padding: 9px 18px; margin-top: 0; flex-shrink: 0; }
+        #range-status {
+            margin-top: 10px; padding: 10px 12px; border-radius: 4px;
+            font-size: 12px; font-family: var(--mono); display: none; line-height: 1.7;
+        }
+        #range-status.ok      { background: #eef6ee; border: 1px solid #b0d8b0; color: var(--green); }
+        #range-status.err     { background: #fdecea; border: 1px solid #f0b8b0; color: var(--red); }
+        #range-status.loading { background: #fdf6ee; border: 1px solid #e8d8c0; color: var(--muted); }
+
+        .btn-fetch {
+            background: transparent; color: var(--accent); border: 1px solid var(--accent2); margin-top: 8px;
+        }
+        .btn-fetch:hover { background: #fdf6ee; }
+        #fetch-status {
+            margin-top: 10px; padding: 8px 10px; border-radius: 4px;
+            font-size: 12px; font-family: var(--mono); display: none;
+        }
+        #fetch-status.ok  { background: #eef6ee; border: 1px solid #b0d8b0; color: var(--green); }
+        #fetch-status.err { background: #fdecea; border: 1px solid #f0b8b0; color: var(--red); }
+
+        /* 歷史批次狀態框 */
+        #history-status {
+            margin-top: 10px; padding: 10px 12px; border-radius: 4px;
+            font-size: 12px; font-family: var(--mono); display: none; line-height: 1.7;
+        }
+        #history-status.ok      { background: #eef6ee; border: 1px solid #b0d8b0; color: var(--green); }
+        #history-status.err     { background: #fdecea; border: 1px solid #f0b8b0; color: var(--red); }
+        #history-status.loading { background: #fdf6ee; border: 1px solid #e8d8c0; color: #5c3010; }
+
+        #message { padding: 10px; margin-top: 12px; border-radius: 4px; display: none; text-align: center; font-size: 13px; }
+        #message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        #message.error   { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        /* 圖表篩選列 */
+        .chart-filter {
+            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+            margin-bottom: 12px; padding: 10px 12px;
+            background: #faf8f3; border: 1px solid var(--border); border-radius: 6px;
+            font-size: 12px; font-family: var(--mono);
+        }
+        .chart-filter label { color: var(--muted); white-space: nowrap; }
+        .chart-filter input[type="date"] {
+            padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px;
+            font-size: 12px; font-family: var(--mono); background: #fff; flex: 1; min-width: 120px;
+        }
+        .chart-filter button {
+            width: auto; padding: 6px 14px; font-size: 12px; margin-top: 0;
+        }
+        .btn-ghost { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+        .btn-ghost:hover { background: #ece9e2; }
+
+        .chart-wrap { position: relative; height: 220px; }
+
+        .tbl-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: var(--mono); }
+        thead tr { background: var(--accent); }
+        th { padding: 10px 12px; text-align: left; font-weight: 600; color: #fff; font-size: 11px; white-space: nowrap; }
+        td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #faf8f3; }
+        .price-cell { font-weight: 700; color: var(--accent); }
+        .src-tag { display: inline-block; padding: 1px 6px; background: #fdf6ee; border: 1px solid #e8d8c0; border-radius: 3px; font-size: 11px; color: var(--muted); }
+        .del-btn { background: none; border: 1px solid #f0c0b0; border-radius: 3px; color: var(--red); font-size: 11px; padding: 2px 8px; cursor: pointer; font-family: var(--mono); width: auto; margin-top: 0; }
+        .del-btn:hover { background: #fff0ee; }
+        .empty { text-align: center; color: var(--muted); padding: 24px 0; font-size: 13px; }
+
+        #log-list { font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.9; }
+        .log-ok  { color: var(--green); }
+        .log-err { color: var(--red); }
+
+        .layout { display: grid; grid-template-columns: 290px 1fr; gap: 20px; align-items: start; }
+        @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } .kpi-row { grid-template-columns: repeat(2,1fr); } }
+    </style>
+</head>
+<body>
+
+<h1>原物料物價記錄系統</h1>
+<p class="subtitle">Commodity Price Recording System — Copper Module | LME HG=F | USD/lb</p>
+
+<div class="source-bar">
+    <strong>資料來源：</strong>
+    <a href="https://finance.yahoo.com/quote/HG%3DF/" target="_blank">Yahoo Finance（HG=F 銅期貨）</a> ·
+    <a href="https://finance.yahoo.com/quote/HG%3DF/history/" target="_blank">歷史資料</a> ·
+    <a href="https://www.lme.com/en/metals/non-ferrous/lme-copper" target="_blank">LME 官方銅價</a> ·
+    <a href="https://www.macrotrends.net/1476/copper-price-today-live-chart" target="_blank">Macrotrends 長期走勢</a>
+</div>
+
+<div class="kpi-row">
+    <div class="kpi"><div class="k-label">最新收盤價</div><div class="k-val" id="k-latest">—</div><div class="k-sub" id="k-latest-date">尚無資料</div></div>
+    <div class="kpi"><div class="k-label">最高記錄價</div><div class="k-val" id="k-max">—</div><div class="k-sub">USD/lb</div></div>
+    <div class="kpi"><div class="k-label">最低記錄價</div><div class="k-val" id="k-min">—</div><div class="k-sub">USD/lb</div></div>
+    <div class="kpi"><div class="k-label">區間漲跌幅</div><div class="k-val" id="k-change">—</div><div class="k-sub" id="k-change-range">首筆→最新</div></div>
+</div>
+
+<div class="layout">
+
+  <!-- 左欄 -->
+  <div>
+
+    <!-- ★ 1980 年至今歷史批次初始化（最醒目功能） -->
+    <div class="card card-history">
+      <h2>📜 歷史批次初始化（1980 至今）</h2>
+      <p style="font-size:12px;color:#5c3010;line-height:1.8;margin-bottom:12px;">
+        一鍵抓取 <strong>1980-01-01 至今</strong> 所有交易日銅價，<br>
+        共約 <strong>11,000+ 筆</strong>（Yahoo Finance HG=F 最完整歷史）。<br>
+        已存在資料自動跳過，可重複執行無副作用。<br>
+        <span style="color:#b03020;font-weight:bold;">⚠️ 執行時間約 15~45 秒，請勿關閉頁面。</span>
+      </p>
+      <button class="btn-history" id="history-btn" onclick="triggerFullHistory()">
+        📥 開始抓取 1980 年至今完整歷史銅價
+      </button>
+      <div id="history-status"></div>
+    </div>
+
+    <!-- 區間批次抓取 -->
+    <div class="card">
+      <h2>📅 設定區間自動抓取</h2>
+      <p style="font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:12px;">
+        選擇起迄日期，批次抓取該區間每個交易日收盤價。已存在的日期自動略過。
+      </p>
+      <div class="range-row">
+        <div class="form-group">
+          <label>起始日期</label>
+          <input type="date" id="range-start" min="1980-01-01" />
+        </div>
+        <div class="form-group">
+          <label>結束日期</label>
+          <input type="date" id="range-end" min="1980-01-01" />
+        </div>
+        <button id="range-btn" onclick="fetchRange()">抓取</button>
+      </div>
+      <div id="range-status"></div>
+    </div>
+
+    <!-- 今日單筆抓取 -->
+    <div class="card">
+      <h2>今日即時抓取</h2>
+      <p style="font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:8px;">
+        抓取今日 <code style="background:#f0ece4;padding:1px 4px;border-radius:2px;font-size:11px;">HG=F</code> 最新收盤價。
+      </p>
+      <button class="btn-fetch" id="fetch-btn" onclick="triggerFetch()">▶ 立即抓取今日銅價</button>
+      <div id="fetch-status"></div>
+    </div>
+
+    <!-- 手動輸入 -->
+    <div class="card">
+      <h2>手動輸入記錄</h2>
+      <div class="form-group">
+        <label>日期（YYYY-MM-DD）</label>
+        <input type="date" id="inp-date" />
+      </div>
+      <div class="form-group">
+        <label>銅價（USD/lb）</label>
+        <input type="number" id="inp-price" step="0.0001" min="0" placeholder="例：4.5320" />
+      </div>
+      <div class="form-group">
+        <label>來源（選填）</label>
+        <input type="text" id="inp-source" placeholder="例：LME 官網" />
+      </div>
+      <div class="form-group">
+        <label>備註（選填）</label>
+        <input type="text" id="inp-note" placeholder="例：電解銅現貨" />
+      </div>
+      <button onclick="addPrice()">新增記錄</button>
+      <p id="message"></p>
+    </div>
+
+    <!-- 爬蟲日誌 -->
+    <div class="card">
+      <h2>爬蟲執行日誌</h2>
+      <div id="log-list"><span style="color:var(--muted)">載入中…</span></div>
+    </div>
+  </div>
+
+  <!-- 右欄 -->
+  <div>
+    <!-- 銅價走勢圖（含獨立篩選） -->
+    <div class="card">
+      <h2>銅價走勢圖（USD/lb）</h2>
+      <div class="chart-filter">
+        <label>顯示範圍：</label>
+        <input type="date" id="chart-start" placeholder="起始" min="1980-01-01" />
+        <span style="color:var(--muted)">～</span>
+        <input type="date" id="chart-end"   placeholder="結束" min="1980-01-01" />
+        <button onclick="applyChartFilter()">套用</button>
+        <button class="btn-ghost" onclick="clearChartFilter()">全部</button>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="price-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- 歷史清單 -->
+    <div class="card">
+      <h2>歷史價格記錄</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>日期</th><th>銅價（USD/lb）</th><th>來源</th><th>備註</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="price-tbody">
+            <tr><td colspan="6"><div class="empty">載入中…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ── 初始化 ──────────────────────────────────────────────────
+  const today = new Date().toISOString().slice(0, 10);
+  const oneMonthAgo = new Date(Date.now() - 30*24*60*60*1000).toISOString().slice(0, 10);
+  document.getElementById('inp-date').value    = today;
+  document.getElementById('range-end').value   = today;
+  document.getElementById('range-start').value = oneMonthAgo;
+  document.getElementById('chart-end').value   = today;
+  document.getElementById('chart-start').value = oneMonthAgo;
+
+  let chart = null;
+
+  function showMsg(msg, isErr=false) {
+    const el = document.getElementById('message');
+    el.textContent = msg;
+    el.className = isErr ? 'error' : 'success';
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+  function esc(s) {
+    return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function fmt(n) { return n!=null ? Number(n).toFixed(4) : '—'; }
+  function showStatus(el, msg, cls) {
+    el.textContent = msg;
+    el.className = cls;
+    el.style.display = 'block';
+  }
+
+  // ── ★ 1980 年至今歷史批次初始化 ────────────────────────────
+  async function triggerFullHistory() {
+    const btn = document.getElementById('history-btn');
+    const box = document.getElementById('history-status');
+    const today = new Date().toISOString().slice(0, 10);
+
+    btn.disabled = true;
+    btn.textContent = '⏳ 抓取中，請耐心等待（可能需要 15~45 秒）…';
+    showStatus(box, '⏳ 正在向 Yahoo Finance 請求 1980-01-01 至今的完整歷史資料…\n此操作需要 15~45 秒，請勿關閉頁面。', 'loading');
+
+    try {
+      const res  = await fetch(`/api/fetch-range?start=1980-01-01&end=${today}`);
+      const data = await res.json();
+
+      if (data.success) {
+        box.className = 'ok';
+        box.innerHTML =
+          `✅ 歷史抓取完成！<br>` +
+          `新增：<strong>${data.inserted}</strong> 筆 ｜ 跳過（已存在）：<strong>${data.skipped}</strong> 筆<br>` +
+          `<span style="color:var(--muted)">${data.message}</span>`;
+        // 抓取完成後，圖表篩選範圍同步切換為 1980-01-01 至今，
+        // 讓使用者立即看到完整歷史走勢，而不是停留在「近一個月」。
+        document.getElementById('chart-start').value = '1980-01-01';
+        document.getElementById('chart-end').value   = today;
+        setTimeout(() => loadAll(), 800);
+      } else {
+        throw new Error(data.message || '抓取失敗');
+      }
+    } catch (e) {
+      box.className = 'err';
+      box.textContent = `✗ 抓取失敗：${e.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📥 開始抓取 1980 年至今完整歷史銅價';
+    }
+  }
+
+  // ── ★ 區間批次抓取 ───────────────────────────────────────────
+  async function fetchRange() {
+    const start = document.getElementById('range-start').value;
+    const end   = document.getElementById('range-end').value;
+    const btn   = document.getElementById('range-btn');
+    const box   = document.getElementById('range-status');
+    if (!start || !end) { showStatus(box, '請選擇起始和結束日期', 'err'); return; }
+    if (start > end)    { showStatus(box, '起始日期不能晚於結束日期', 'err'); return; }
+
+    btn.disabled = true;
+    btn.textContent = '⏳ 抓取中…';
+    showStatus(box, `正在抓取 ${start} ～ ${end} 的銅價資料，請稍候…`, 'loading');
+
+    try {
+      const res  = await fetch(`/api/fetch-range?start=${start}&end=${end}`);
+      const data = await res.json();
+      if (!data.success) {
+        showStatus(box, `✗ ${data.message}`, 'err');
+      } else {
+        // 抓取完成後，圖表篩選範圍同步切換為剛抓取的區間
+        document.getElementById('chart-start').value = start;
+        document.getElementById('chart-end').value   = end;
+        showStatus(box,
+          `✓ ${data.message}` + (data.inserted > 0 ? `\n寫入日期：${(data.data||[]).map(r=>r.date).join('、')}` : ''),
+          'ok'
+        );
+        loadAll();
+      }
+    } catch(e) {
+      showStatus(box, `✗ 網路錯誤：${e.message}`, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '抓取';
+    }
+  }
+
+  // ── 今日單筆抓取 ─────────────────────────────────────────────
+  async function triggerFetch() {
+    const btn = document.getElementById('fetch-btn');
+    const box = document.getElementById('fetch-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ 抓取中…';
+    box.style.display = 'none';
+    try {
+      const res  = await fetch('/api/fetch');
+      const data = await res.json();
+      box.style.display = 'block';
+      box.className = data.success ? 'ok' : 'err';
+      box.textContent = data.skipped ? `ℹ ${data.message}` : (data.success ? `✓ ${data.message}` : `✗ ${data.message}`);
+      if (data.success && !data.skipped) loadAll();
+    } catch(e) {
+      box.style.display = 'block'; box.className = 'err';
+      box.textContent = `✗ ${e.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '▶ 立即抓取今日銅價';
+    }
+  }
+
+  // ── 手動新增 ─────────────────────────────────────────────────
+  async function addPrice() {
+    const date   = document.getElementById('inp-date').value.trim();
+    const price  = document.getElementById('inp-price').value.trim();
+    const source = document.getElementById('inp-source').value.trim();
+    const note   = document.getElementById('inp-note').value.trim();
+    if (!date)  return showMsg('請選擇日期', true);
+    if (!price) return showMsg('請輸入銅價', true);
+    try {
+      const res  = await fetch('/api/prices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, price_usd: Number(price), source, note })
+      });
+      const data = await res.json();
+      if (!data.success) return showMsg(data.message, true);
+      showMsg('✅ 新增成功');
+      document.getElementById('inp-price').value  = '';
+      document.getElementById('inp-source').value = '';
+      document.getElementById('inp-note').value   = '';
+      loadAll();
+    } catch(e) { showMsg('網路錯誤', true); }
+  }
+
+  // ── 刪除 ─────────────────────────────────────────────────────
+  async function delPrice(id) {
+    if (!confirm('確認刪除這筆記錄？')) return;
+    const res  = await fetch(`/api/prices/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!data.success) return showMsg(data.message, true);
+    showMsg('已刪除'); loadAll();
+  }
+
+  // ── 圖表篩選 ─────────────────────────────────────────────────
+  function applyChartFilter() { loadChart(); }
+  function clearChartFilter() {
+    document.getElementById('chart-start').value = '';
+    document.getElementById('chart-end').value   = '';
+    loadChart();
+  }
+
+  // ── 統計 KPI ─────────────────────────────────────────────────
+  async function loadStats() {
+    const { data: s } = await fetch('/api/stats').then(r => r.json());
+    document.getElementById('k-latest').textContent      = s.latest_price!=null ? `$${fmt(s.latest_price)}` : '—';
+    document.getElementById('k-latest-date').textContent = s.latest_date || '尚無資料';
+    document.getElementById('k-max').textContent         = s.max_price!=null ? `$${fmt(s.max_price)}` : '—';
+    document.getElementById('k-min').textContent         = s.min_price!=null ? `$${fmt(s.min_price)}` : '—';
+    if (s.change_pct!=null) {
+      const sign = Number(s.change_pct)>=0 ? '+' : '';
+      const el = document.getElementById('k-change');
+      el.textContent = `${sign}${s.change_pct}%`;
+      el.className = `k-val ${Number(s.change_pct)>=0 ? 'up' : 'down'}`;
+      document.getElementById('k-change-range').textContent = `${s.oldest_date} → ${s.latest_date}`;
+    }
+  }
+
+  // ── 折線圖 ───────────────────────────────────────────────────
+  async function loadChart() {
+    const cs = document.getElementById('chart-start').value;
+    const ce = document.getElementById('chart-end').value;
+    let url = '/api/prices';
+    const p = [];
+    if (cs) p.push(`start=${cs}`);
+    if (ce) p.push(`end=${ce}`);
+    if (p.length) url += '?' + p.join('&');
+
+    const { data } = await fetch(url).then(r => r.json());
+    const ctx = document.getElementById('price-chart').getContext('2d');
+    if (chart) chart.destroy();
+    if (!data || data.length === 0) { ctx.clearRect(0, 0, 9999, 9999); return; }
+
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.map(r => r.date),
+        datasets: [{
+          label: 'LME 銅期貨（USD/lb）',
+          data: data.map(r => r.price_usd),
+          borderColor: '#b87333',
+          backgroundColor: 'rgba(184,115,51,.10)',
+          borderWidth: 1.8,
+          pointRadius: data.length > 60 ? 0 : 3,
+          pointHoverRadius: 5,
+          fill: true, tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => ` $${c.parsed.y.toFixed(4)} USD/lb` } }
+        },
+        scales: {
+          x: { ticks: { font: { size: 10, family: 'Courier New' }, maxTicksLimit: 12, color: '#888' }, grid: { color: '#f0ece4' } },
+          y: { ticks: { font: { size: 10, family: 'Courier New' }, color: '#888', callback: v => `$${v.toFixed(2)}` }, grid: { color: '#f0ece4' } }
+        }
+      }
+    });
+  }
+
+  // ── 歷史清單表格 ──────────────────────────────────────────────
+  async function loadPrices() {
+    const { data } = await fetch('/api/prices').then(r => r.json());
+    const tbody = document.getElementById('price-tbody');
+    if (!data || data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty">尚無記錄</div></td></tr>`; return;
+    }
+    const sorted = [...data].sort((a,b) => b.date.localeCompare(a.date));
+    tbody.innerHTML = sorted.map(r => `
+      <tr>
+        <td>${r.id}</td>
+        <td>${r.date}</td>
+        <td class="price-cell">$${fmt(r.price_usd)}</td>
+        <td><span class="src-tag">${esc(r.source||'—')}</span></td>
+        <td style="color:var(--muted)">${esc(r.note||'—')}</td>
+        <td><button class="del-btn" onclick="delPrice(${r.id})">刪除</button></td>
+      </tr>
+    `).join('');
+  }
+
+  // ── 爬蟲日誌 ─────────────────────────────────────────────────
+  async function loadLog() {
+    const { data } = await fetch('/api/fetch-log').then(r => r.json());
+    const el = document.getElementById('log-list');
+    if (!data || data.length===0) { el.innerHTML = '<span>尚無日誌</span>'; return; }
+    el.innerHTML = data.map(r =>
+      `<div class="log-${r.status==='success'?'ok':'err'}">[${r.fetched_at}] ${esc(r.message)}</div>`
+    ).join('');
+  }
+
+  async function loadAll() {
+    await Promise.all([loadStats(), loadChart(), loadPrices(), loadLog()]);
+  }
+
+  loadAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,405 @@
+openapi: 3.0.3
+info:
+  title: 原物料物價記錄系統 — 銅價追蹤模組 (LME HG=F)
+  description: |
+    逢甲大學學士後資訊工程系 113 學年度專題
+    追蹤 LME 銅期貨 (HG=F) 每日收盤價，單位 USD/lb。
+    資料來源：Yahoo Finance v8 Chart API
+    支援手動輸入、今日自動抓取、歷史區間批次抓取（最早支援 1980-01-01）。
+  version: 1.0.0
+  contact:
+    name: 彭孝桓 (Jack Peng)
+servers:
+  - url: http://localhost:3000
+    description: 本地開發伺服器
+tags:
+  - name: Prices
+    description: 銅價資料 CRUD 與統計
+  - name: Crawler
+    description: Yahoo Finance 爬蟲相關 API
+  - name: Logs
+    description: 爬蟲執行日誌
+paths:
+  /api/prices:
+    get:
+      tags: [Prices]
+      summary: 查詢銅價記錄列表
+      description: 查詢資料庫中的銅價記錄，可透過起迄日期篩選，結果依日期升冪排序。
+      parameters:
+        - name: start
+          in: query
+          description: 起始日期（含），格式 YYYY-MM-DD
+          schema:
+            type: string
+            format: date
+            example: "2024-01-01"
+        - name: end
+          in: query
+          description: 結束日期（含），格式 YYYY-MM-DD
+          schema:
+            type: string
+            format: date
+            example: "2024-12-31"
+      responses:
+        '200':
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  count:
+                    type: integer
+                    example: 250
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CopperPrice'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Prices]
+      summary: 手動新增銅價記錄
+      description: 手動輸入一筆銅價記錄，日期不可為空，價格必須為正數。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, price_usd]
+              properties:
+                date:
+                  type: string
+                  format: date
+                  example: "2024-06-17"
+                price_usd:
+                  type: number
+                  format: float
+                  example: 4.5320
+                source:
+                  type: string
+                  example: "LME 官網"
+                note:
+                  type: string
+                  example: "電解銅現貨"
+      responses:
+        '201':
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "新增成功"
+                  data:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      date: { type: string, format: date }
+                      price_usd: { type: number }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/prices/{id}:
+    delete:
+      tags: [Prices]
+      summary: 刪除指定銅價記錄
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 記錄的 id（整數）
+          schema:
+            type: integer
+            example: 42
+      responses:
+        '200':
+          description: 刪除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string, example: "已刪除" }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/stats:
+    get:
+      tags: [Prices]
+      summary: 取得統計摘要
+      description: 回傳資料庫中銅價的統計資訊，包含最新價、最高價、最低價、平均價、區間漲跌幅。
+      responses:
+        '200':
+          description: 統計成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+                        description: 總筆數
+                        example: 11200
+                      min_price:
+                        type: number
+                        description: 最低收盤價（USD/lb）
+                        example: 0.6224
+                      max_price:
+                        type: number
+                        description: 最高收盤價（USD/lb）
+                        example: 5.0840
+                      avg_price:
+                        type: number
+                        description: 平均收盤價（USD/lb）
+                        example: 2.1530
+                      latest_price:
+                        type: number
+                        description: 最新收盤價（USD/lb）
+                        example: 4.5320
+                      latest_date:
+                        type: string
+                        format: date
+                        description: 最新記錄日期
+                        example: "2026-06-16"
+                      oldest_price:
+                        type: number
+                        description: 最早記錄的收盤價
+                        example: 0.9254
+                      oldest_date:
+                        type: string
+                        format: date
+                        description: 最早記錄日期
+                        example: "1980-01-02"
+                      change_pct:
+                        type: string
+                        description: 從首筆到最新的總漲跌幅（百分比字串）
+                        example: "+389.72"
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/fetch-range:
+    get:
+      tags: [Crawler]
+      summary: 批次抓取歷史區間銅價
+      description: |
+        呼叫 Yahoo Finance v8 Chart API 抓取指定區間每個交易日的 HG=F 收盤價，
+        並批次寫入資料庫。已存在的日期自動跳過（依 date + source 判斷）。
+        支援 start=1980-01-01（Yahoo Finance HG=F 最早可查詢日期）。
+        長區間（如 1980 至今）需要 15~45 秒執行時間。
+      parameters:
+        - name: start
+          in: query
+          required: true
+          description: 起始日期，格式 YYYY-MM-DD，最早支援 1980-01-01
+          schema:
+            type: string
+            format: date
+            example: "1980-01-01"
+        - name: end
+          in: query
+          required: true
+          description: 結束日期，格式 YYYY-MM-DD，不能早於 start
+          schema:
+            type: string
+            format: date
+            example: "2026-06-17"
+      responses:
+        '200':
+          description: 抓取完成
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  inserted:
+                    type: integer
+                    description: 本次新寫入筆數
+                    example: 11234
+                  skipped:
+                    type: integer
+                    description: 跳過（已存在）筆數
+                    example: 0
+                  message:
+                    type: string
+                    example: "成功寫入 11234 筆，跳過已存在 0 筆"
+                  data:
+                    type: array
+                    description: 本次新增的記錄（date + price）
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date }
+                        price: { type: number }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          description: Yahoo Finance 抓取失敗（網路異常或 API 回應異常）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/fetch:
+    get:
+      tags: [Crawler]
+      summary: 抓取今日最新銅價（單筆）
+      description: |
+        抓取今日 HG=F 收盤價並寫入資料庫。
+        若今日已有記錄（source = Yahoo Finance (HG=F)）則跳過，不重複寫入。
+        伺服器啟動時會自動呼叫一次此邏輯。
+      responses:
+        '200':
+          description: 執行完成（成功或跳過）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  skipped:
+                    type: boolean
+                    description: true = 今日已有記錄或為非交易日
+                    example: false
+                  message:
+                    type: string
+                    example: "抓取成功：4.5320 USD/lb"
+                  data:
+                    type: object
+                    properties:
+                      date: { type: string, format: date }
+                      price: { type: number }
+        '502':
+          description: Yahoo Finance 抓取失敗
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/fetch-log:
+    get:
+      tags: [Logs]
+      summary: 取得最近 20 筆爬蟲執行日誌
+      description: 依 id 降冪取最近 20 筆，記錄每次爬蟲的執行時間、狀態、訊息。
+      responses:
+        '200':
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FetchLog'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+components:
+  schemas:
+    CopperPrice:
+      type: object
+      description: 銅價記錄（copper_prices 資料表）
+      properties:
+        id:
+          type: integer
+          example: 1
+        date:
+          type: string
+          format: date
+          example: "2024-06-17"
+        price_usd:
+          type: number
+          format: float
+          example: 4.5320
+        unit:
+          type: string
+          example: "USD/lb"
+        source:
+          type: string
+          example: "Yahoo Finance (HG=F)"
+        note:
+          type: string
+          example: "區間批次抓取"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-06-17 10:23:45"
+
+    FetchLog:
+      type: object
+      description: 爬蟲執行日誌（fetch_log 資料表）
+      properties:
+        id:
+          type: integer
+          example: 5
+        fetched_at:
+          type: string
+          format: date-time
+          example: "2026-06-17 10:23:45"
+        status:
+          type: string
+          enum: [success, error]
+          example: "success"
+        message:
+          type: string
+          example: "區間抓取 1980-01-01~2026-06-17：新增 11234 筆，跳過 0 筆"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: "錯誤描述訊息"
+
+  responses:
+    BadRequest:
+      description: 請求參數錯誤
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: 找不到指定資源
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServerError:
+      description: 伺服器內部錯誤
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
