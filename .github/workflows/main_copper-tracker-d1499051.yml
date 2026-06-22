@@ -20,7 +20,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.x'
-          cache: 'npm'
 
       # 在 runner 上安裝相依套件並編譯 sqlite3 原生模組
       - name: Install dependencies
