@@ -21,16 +21,14 @@ jobs:
         with:
           node-version: '22.x'
 
-      # 在 runner 上安裝相依套件並編譯 sqlite3 原生模組
-      - name: Install dependencies
-        run: npm install --omit=dev
-
-      # 打包部署 zip —— 必須「包含」node_modules（Azure 端不再 build）
-      - name: Create deployment package (INCLUDING node_modules)
+      # node_modules 不打包，讓 Azure 端（SCM_DO_BUILD_DURING_DEPLOYMENT=true）自己 npm install
+      # 這樣 better-sqlite3 會在 Azure 的 glibc 環境上編譯，binary 相容
+      - name: Zip artifact for deployment (excluding node_modules)
         run: |
           zip -r release.zip . \
             --exclude ".git/*" \
             --exclude ".github/*" \
+            --exclude "node_modules/*" \
             --exclude "db/sqlite.db" \
             --exclude ".env" \
             --exclude ".DS_Store" \
@@ -46,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     permissions:
-      id-token: write      # OIDC 登入必須
+      id-token: write
       contents: read
 
     steps:
@@ -66,7 +64,6 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_191EDF604E1C4845AC801D94F73C749F }}
 
       - name: Deploy to Azure Web App
-        id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
           app-name: 'copper-tracker-D1499051'
